@@ -27,6 +27,7 @@ io.on('connection', socket => {
         })
 
         socket.on('send-selection', range => {
+            console.log(range)
             socket.broadcast.to(documentId).emit('receive-selection', range)
         })
 
