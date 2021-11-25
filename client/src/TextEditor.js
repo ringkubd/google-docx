@@ -1,14 +1,22 @@
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useCallback, useEffect, useRef, useState} from "react";
 import Quill from "quill";
 import "quill/dist/quill.snow.css"
+import "quill/dist/quill.bubble.css";
 import './style.css';
 import { io } from "socket.io-client"
 import { useParams } from "react-router-dom";
 import QuillCursors from "quill-cursors";
 import  { v4 as uuidV4 } from "uuid";
-import Table from "quill/modules/table";
+import sampleHtml from "./smaplehtml";
+import QuillBetterTable from 'quill-better-table'
+import * as QuillTableUI from 'quill-table-ui'
 
-Quill.register('modules/cursors', QuillCursors)
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faComment } from '@fortawesome/free-solid-svg-icons'
+
+Quill.register('modules/cursors', QuillCursors, true)
+Quill.register('modules/table', QuillBetterTable, true)
+Quill.register({'modules/tableUI': QuillTableUI}, true)
 
 const TOOLBAR_OPTIONS = [
     ['bold', 'italic', 'underline', 'strike'],        // toggled buttons
@@ -26,40 +34,40 @@ const TOOLBAR_OPTIONS = [
     [{ 'align': [] }],
     ['clean'],
     ['link'],
+    [ { history: ['redo', 'undo'] } ],
+    ['air-bar'],
 ]
 
 const SAVE_INTERVAL_MS = 2000
 const randomColor = Math.floor(Math.random()*16777215).toString(16);
 
-function selectionChangeHandler(cursors) {
-    const debouncedUpdate = debounce(updateCursor, 500);
-    return function(range, oldRange, source) {
-        if (source === 'user') {
-            // If the user has manually updated their selection, send this change
-            // immediately, because a user update is important, and should be
-            // sent as soon as possible for a smooth experience.
-            updateCursor(range);
-        } else {
-            // Otherwise, it's a text change update or similar. These changes will
-            // automatically get transformed by the receiving client without latency.
-            // If we try to keep sending updates, then this will undo the low-latency
-            // transformation already performed, which we don't want to do. Instead,
-            // add a debounce so that we only send the update once the user has stopped
-            // typing, which ensures we send the most up-to-date position (which should
-            // hopefully match what the receiving client already thinks is the cursor
-            // position anyway).
-            debouncedUpdate(range);
-        }
-    };
-    function updateCursor(range) {
-        // Use a timeout to simulate a high latency connection.
-        setTimeout(() => cursors.moveCursor('cursor', range), 1000);
-    }
-}
+
 function updateCursor(cursors,range, cursorid) {
     // Use a timeout to simulate a high latency connection.
     setTimeout(() => cursors.moveCursor(cursorid, range), 1000);
 }
+
+// function drawComments(metaData) {
+//     var commentContainer = $("#comments-container");
+//     var content = "";
+//     metaData.forEach(function(index, value) {
+//         content +=
+//             "<a class='comment-link' href='#' data-index='" +
+//             index +
+//             "'><li class='list-group-item'>" +
+//             value.comment +
+//             "</li></a>";
+//     });
+//     commentContainer.html(content);
+// }
+
+// $(document).on('click','.comment-link',function () {
+//     var index = $(this).data('index');
+//     console.log("comment link called",index);
+//     var data = metaData[index];
+//     quill.setSelection(data.range.index, data.range.length);
+// });
+
 
 function debounce(func, wait) {
     let timeout;
@@ -80,6 +88,13 @@ export default function TextEditor(){
     const [socket, setSocket] = useState()
     const [cursor, setCursor] = useState()
     const [username, setUsername] = useState()
+    const [metaData, setMetaData] = useState()
+    const inlineToolbar = useRef()
+    const comment = useRef()
+    const commentIcon = useRef()
+    const commentsContainer = useRef()
+
+    const [ commentText, setCommentText ] = useState()
 
     useEffect(() => {
         const s = io("http://localhost:3001")
@@ -88,6 +103,102 @@ export default function TextEditor(){
             return s.disconnect()
         }
     }, [])
+
+    const clickComment = (e) => {
+        comment.current.style.display = 'block'
+        commentIcon.current.style.display = 'none'
+    }
+
+    const onChangeComment = (e) =>{
+        setCommentText(e.target.value)
+    }
+
+    const submitComment = (e) => {
+        e.preventDefault()
+        if (commentText){
+            var range = quill.getSelection();
+            console.log(range)
+            if (range){
+                if (range.length == 0) {
+                    alert("Please select text", range.index);
+                }else {
+                    var text = quill.getText(range.index, range.length);
+                    console.log("User has highlighted: ", text);
+                    setMetaData({ range: range, comment: prompt })
+                    quill.formatText(range.index, range.length, {
+                        background: "#fff72b"
+                    });
+                }
+            }
+        }
+    }
+
+     const drawComments = (metaData) =>{
+        var commentContainer = commentsContainer.current;
+        var content = "";
+        metaData.forEach(function(index, value) {
+            content +=
+                "<a class='comment-link' href='#' data-index='" +
+                index +
+                "'><li class='list-group-item'>" +
+                value.comment +
+                "</li></a>";
+        });
+        commentContainer.innerHtml(content);
+    }
+
+    useEffect(()=> {
+        if (quill == null || socket == null) return
+        let toolbar = inlineToolbar.current
+        toolbar.style.visibility = "hidden";
+        toolbar.style.position = "absolute";
+        var toolbar_width = toolbar.offsetWidth, // get the width and height so we can keep it from squashing at the edge of the page
+            toolbar_height = toolbar.offsetHeight;
+        toolbar.style.display = "none"; // hide it if it's not hidden already.
+        toolbar.style.visibility = "visible";
+        toolbar.style.opacity = "0";
+        toolbar.style.position = "fixed";
+        toolbar.style.transition = "opacity 300ms, left 300ms, top 300ms";
+
+        comment.current.style.display = 'none'
+
+        quill.on('selection-change', function (range, oldRange, source) {
+            if (range == null || source === "api") return
+
+            if (range.length === 0) { // no selection, fade out.
+                toolbar.style.opacity = 0;
+                setTimeout(function () {
+                    toolbar.style.display = "none"
+                }, 300);
+            } else {
+                var selection_dimensions = window.getSelection().getRangeAt(0).getBoundingClientRect(); // see http://stackoverflow.com/a/17887684/2661831 . Probably alchemy and/or black magic.
+                // if we're going to bump into the side of the window, go to the edge less 10px.
+                if (toolbar_height + selection_dimensions.bottom > window.innerHeight) {
+                    toolbar.style.top = window.innerHeight + (toolbar_height + 0) + "px";
+                } else {
+                    toolbar.style.top = selection_dimensions.bottom - 30 + "px";
+                }
+
+                if (toolbar_width + selection_dimensions.right > window.innerWidth) {
+                    toolbar.style.left = window.innerWidth - (toolbar_width + 10) + "px";
+                } else {
+                    toolbar.style.left = selection_dimensions.right + 0 + "px";
+                }
+
+                toolbar.style.display = "block";
+                toolbar.style.opacity = 1;
+                toolbar.style.zIndex = 888;
+
+                comment.current.style.display = 'none'
+                commentIcon.current.style.display = 'block'
+
+            }
+        });
+
+        return () => {
+
+        }
+    }, [quill])
 
     // Selection Change
 
@@ -130,7 +241,12 @@ export default function TextEditor(){
     useEffect(() => {
         if (quill == null || socket == null) return
         socket.once('load-document', document => {
-            quill.setContents(document)
+            if (document == ""){
+                var delta = quill.clipboard.convert({html: sampleHtml}, 'silent')
+                quill.setContents(delta, 'silent')
+            }else{
+                quill.setContents(document)
+            }
             quill.enable()
         })
         socket.emit('get-document', documentId)
@@ -190,20 +306,23 @@ export default function TextEditor(){
 
         let q = new Quill(editor, {
             theme: "snow",
-            table: true,
             modules: {
+                toolbar: TOOLBAR_OPTIONS,
+                table: true,
                 cursors: {
                     hideDelayMs: 5000,
                     hideSpeedMs: 0,
                     selectionChangeSource: null,
                     transformOnTextChange: true,
                 },
-                toolbar: TOOLBAR_OPTIONS,
                 history: {
                     delay: 2000,
                     maxStack: 500,
                     userOnly: true
-                }
+                },
+            },
+            keyboard: {
+                bindings: QuillBetterTable.keyboardBindings
             }
         })
         q.disable()
@@ -212,6 +331,21 @@ export default function TextEditor(){
 
     }, [])
     return (
-        <div className="container" ref={wrapper}></div>
+        <div>
+            <div className="inlineToolbar" ref={inlineToolbar}>
+                <form action="" onSubmit={submitComment}>
+                    <span className="ql-formats">
+                        <input type="button" className="ql-air-bar" type="text" hidden ref={comment} onChange={onChangeComment}/>
+                    </span>
+                </form>
+                <span className="ql-formats" ref={commentIcon}>
+                    <button type="button" className="ql-air-bar">
+                        <FontAwesomeIcon onClick={clickComment}  icon={faComment}  style={{cursor: 'hand'}}/>
+                    </button>
+                </span>
+            </div>
+            <div className="container" ref={wrapper}></div>
+            <div className="commentsContainer" ref={commentsContainer}></div>
+        </div>
     )
 }

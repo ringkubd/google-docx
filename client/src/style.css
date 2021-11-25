@@ -34,6 +34,13 @@ body{
     color: rebeccapurple;
 }
 
+.inlineToolbar{
+    background-color: #B6B6;
+    border: groove;
+    box-shadow: 0 0 5px 0 rgba(0, 0, 0, .5);
+    color: #F6F6F6;
+}
+
 @page  {
     margin: 1in;
 }
